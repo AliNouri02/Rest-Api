@@ -60,7 +60,7 @@ exports.handleContactPage = async (req, res) => {
             .required("آدرس ایمیل الزامی می باشد"),
         message: string().required("پیام اصلی الزامی می باشد"),
     });
-
+ 
     try {
         await schema.validate(req.body, { abortEarly: false });
 

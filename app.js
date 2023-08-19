@@ -3,13 +3,9 @@ const path = require('path')
 const fileUpload = require('express-fileupload');
 const express = require('express');
 const dotEnv = require('dotenv');
-const passport = require('passport');
-const flash = require('connect-flash');
-const session = require('express-session');
-const MongoStore = require('connect-mongo');
-
 const connectDb = require('./config/db');
 const { errorHandler } = require('./middlewares/errors');
+const { setHeaders } = require('./middlewares/headers');
 
 // Load Confg
 dotEnv.config({ path: "./config/config.env" })
@@ -26,33 +22,11 @@ const app = express();
 // Body Parser
 app.use(express.urlencoded({ extended: false })); // Form data parser middleware for parsing application
 app.use(express.json())
+app.use(setHeaders)
 
 // File Upload Middleware 
 app.use(fileUpload())
 
-// Session
-const store = MongoStore.create({
-    mongoUrl: process.env.MOONGO_URL, // Replace with your MongoDB connection URL
-    collectionName: 'sessions' // Specify the collection name for storing sessions
-});
-
-app.use(
-    session({
-        secret: process.env.SESSION_SECRET,
-        resave: false,
-        saveUninitialized: false,
-        unset: "destroy",
-        store: store
-    })
-);
-
-// Passport
-app.use(passport.initialize());
-app.use(passport.session());
-
-
-// Flash
-app.use(flash());
 
 
 // Static Folder

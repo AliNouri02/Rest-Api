@@ -6,41 +6,32 @@ const shortId = require('shortid');
 const appRoot = require('app-root-path');
 
 const Blog = require('../models/Blog');
-
-const { storage, fileFilter } = require('../utils/multer');
+const { fileFilter } = require('../utils/multer');
 
 exports.createPost = async (req, res) => {
-    const errorArr = [];
 
     const thumbnail = req.files ? req.files.thumbnail : {};
     const fileName = `${shortId.generate()}_${thumbnail.name}`;
+    const uploadPath = `${appRoot}/public/uploads/thumbnails/${fileName}`;
 
     try {
         req.body = { ...req.body, thumbnail };
+
         await Blog.postValidation(req.body);
+
         await sharp(thumbnail.data).jpeg({
             quality: 60,
         })
-            .toFile(`${appRoot}/public/uploads/thumbnail/${fileName}`)
+            .toFile(uploadPath)
             .catch(err => console.log(err));
 
         await Blog.create({ ...req.body, user: req.user.id, thumbnail: fileName });
-        res.redirect("/dashboard");
+
+
+        res.status(201).json({ message: "پست جدید با موفقیت ساخته شد" });
+
     } catch (err) {
-        console.log(err);
-        err.inner.forEach((e) => {
-            errorArr.push({
-                name: e.path,
-                message: e.message,
-            });
-        });
-        res.render("private/addPost", {
-            pageTitle: "بخش مدیریت | ساخت پست جدید",
-            path: "/dashboard/add-post",
-            layout: "./layouts/dashLayout",
-            fullname: req.user.fullname,
-            errors: errorArr,
-        });
+        next(err);
     }
 };
 

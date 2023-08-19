@@ -1,206 +1,146 @@
-const passport = require('passport');
-
 const User = require('../models/User');
 const { sendEmail } = require('../utils/mailer');
 const jwt = require('jsonwebtoken');
-
-
-exports.logout = (req, res) => {
-    req.session = null
-    req.logout(function (err) {
-        if (err) {
-            // Handle any error that occurs during logout
-            console.error(err);
-        }
-        // req.flash("success_msg", "خروج موفقیت امیز بود");
-        res.set(
-            "Cache-Control",
-            "no-cache,private,no-store,must-revalidate,max-stale=0,post-check=0,pre-check=0"
-        )
-        res.redirect('/users/login');
-    });
-};
-
+const bcrypt = require('bcryptjs');
 
 exports.handelLogin = async (req, res, next) => {
-    passport.authenticate('local', {
-        failureRedirect: '/users/login',
-        failureFlash: true,
-    })(req, res, next);
-}
 
-exports.rememberMe = (req, res, next) => {
-    if (req.body.remember) {
-        req.session.cookie.originalMaxAge = 24 * 60 * 60 * 1000 * 7;
-    } else {
-        req.session.cookie.expire = null
+    const { email, password } = req.body;
+    try {
+        const user = await User.findOne({ email })
+        if (!user) {
+            const error = new Error('کاربری با این ایمیل یافت نشد')
+            error.statusCode = 404;
+            throw error
+        }
+
+        const isEqual = await bcrypt.compare(password, user.password)
+
+        if (isEqual) {
+            const token = jwt.sign({
+                user: {
+                    userId: user._id.toString(),
+                    email: user.email,
+                    fullname: user.fullname
+                }
+            }, process.env.JWT_SECRET, { expiresIn: "1h" });
+
+            res.status(200).json({ token, userId: user._id.toString() })
+
+        } else {
+            const error = new Error('کاربری با این ایمیل یافت نشد')
+            error.statusCode = 422;
+            throw error
+        }
+
+    } catch (error) {
+        next(error)
     }
 
-    res.redirect("/dashboard")
 }
 
-exports.createUser = async (req, res) => {
+
+exports.createUser = async (req, res, next) => {
     const errors = [];
 
     try {
         await User.userValidation(req.body);
         const { fullname, email, password } = req.body
-        const user = await User.findOne({ email })
+        const user = await User.findOne({ email });
         if (user) {
-            errors.push({ message: "کاربری با این ایمیل موجود است" })
-            return res.render('register', {
-                pageTitle: "ثبت نام کاربر جدید",
-                path: "/register",
-                errors
-            });
+            const error = new Error(
+                "کاربری با این ایمیل در پایگاه داده موجود است"
+            );
+            error.statusCode = 422;
+            throw error;
+        } else {
+            await User.create({ fullname, email, password });
+
+            //? Send Welcome Email
+            sendEmail(
+                email,
+                fullname,
+                "خوش آمدی به وبلاگ ما",
+                "خیلی خوشحالیم که به جمع ما وبلاگرهای خفن ملحق شدی"
+            );
+
+            res.status(201).json({ message: "عضویت موفقیت آمیز بود" });
         }
-        await User.create({
-            fullname,
-            email,
-            password
-        });
 
-        //Send Welcome Email
-        sendEmail(email, fullname, "خوش امدید به وبلاگ ما", "حضور شما باعث دلگرمی ماست")
-
-        req.flash("success_msg", "ثبت نام موفقیت امیز بود")
-        res.redirect('/users/login');
-        // For Hash Password
-        // bcrypt.genSalt(10, (err, salt) => {
-        //     if (err) throw err;
-        //     bcrypt.hash(password, salt, async (err, hash) => {
-        //         if (err) throw err;
-
-        //         await User.create({
-        //             fullName,
-        //             email,
-        //             password: hash
-        //         });
-        //         res.redirect('/users/login');
-        //     })
-        // })
-
-        // For Create User
-
-        // const user = new User({
-        //     fullname,
-        //     email,
-        //     password
-        // })
-        // user.save()
-        //     .then((user) => {
-        //         console.log(user);
-        //         res.redirect('/users/login');
-        //     })
-        //     .catch((err) => {
-        //         if (err) throw err;
-        //     })
     } catch (error) {
-        console.log("ffffffff");
-        console.log(error);
-        error.inner.forEach(e => {
-            errors.push({
-                name: e.path,
-                message: e.message
-            })
-        });
-        return res.render('register', {
-            pageTitle: "ثبت نام کاربر جدید",
-            path: "/register",
-            errors
-        });
+        next(err);
     }
 }
 
-exports.handleForgetPassword = async (req, res) => {
+exports.handleForgetPassword = async (req, res, next) => {
+
     const { email } = req.body;
 
-    const user = await User.findOne({ email: email });
-
-    if (!user) {
-        req.flash("error", "کاربری با ایمیل در پایگاه داده ثبت نیست");
-
-        return res.render("forgetPass", {
-            pageTitle: "فراموشی رمز عبور",
-            path: "/login",
-            message: req.flash("success_msg"),
-            error: req.flash("error"),
-        });
-    }
-
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-        expiresIn: "1h",
-    });
-    const resetLink = `http://localhost:${process.env.PORT}/users/reset-password/${token}`;
-
-    sendEmail(
-        user.email,
-        user.fullname,
-        "فراموشی رمز عبور",
-        `
-        جهت تغییر رمز عبور فعلی رو لینک زیر کلیک کنید
-        <a href="${resetLink}">لینک تغییر رمز عبور</a>
-    `
-    );
-
-    req.flash("success_msg", "ایمیل حاوی لینک با موفقیت ارسال شد");
-
-    res.render("forgetPass", {
-        pageTitle: "فراموشی رمز عبور",
-        path: "/login",
-        message: req.flash("success_msg"),
-        error: req.flash("error"),
-    });
-};
-
-exports.resetPassword = async (req, res) => {
-    const token = req.params.token;
-
-    let decodedToken;
-
     try {
-        decodedToken = jwt.verify(token, process.env.JWT_SECRET);
-        console.log(decodedToken);
-    } catch (err) {
-        console.log(err);
-        if (!decodedToken) {
-            return res.redirect("/404");
+        const user = await User.findOne({ email: email });
+
+        if (!user) {
+            const error = new Error("کاربری با ایمیل در پایگاه داده ثبت نشده");
+            error.statusCode = 404;
+            throw error;
         }
+
+        const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
+            expiresIn: "1h",
+        });
+        const resetLink = `http://localhost:${process.env.PORT}/users/reset-password/${token}`;
+
+        sendEmail(
+            user.email,
+            user.fullname,
+            "فراموشی رمز عبور",
+            `جهت تغییر رمز عبور فعلی رو لینک زیر کلیک کنید
+            <a href="${resetLink}">لینک تغییر رمز عبور</a>`
+        );
+
+        res.status(200).json({
+            message: "لینک ریست کلمه عبور با موفقیت ارسال شد",
+        });
+
+    } catch (error) {
+        next(error)
     }
 
-    res.render("resetPass", {
-        pageTitle: "تغییر پسورد",
-        path: "/login",
-        message: req.flash("success_msg"),
-        error: req.flash("error"),
-        userId: decodedToken.userId,
-    });
 };
 
-exports.handleResetPassword = async (req, res) => {
+exports.handleResetPassword = async (req, res, next) => {
+    const token = req.params.token;
     const { password, confirmPassword } = req.body;
 
-    if (password !== confirmPassword) {
-        req.flash("error", "کلمه های عبور یاکسان نیستند");
+    try {
+        const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
+        if (!decodedToken) {
+            const error = new Error("شما مجوز این عملیات را ندارید");
+            error.statusCode = 401;
+            throw error;
+        }
 
-        return res.render("resetPass", {
-            pageTitle: "تغییر پسورد",
-            path: "/login",
-            message: req.flash("success_msg"),
-            error: req.flash("error"),
-            userId: req.params.id,
-        });
+        if (password !== confirmPassword) {
+            const error = new Error("کلمه های عبور یکسان نمی باشند");
+            error.statusCode = 422;
+            throw error;
+        }
+
+        const user = await User.findOne({ _id: decodedToken.userId });
+
+        if (!user) {
+            const error = new Error(
+                "کاربری با این شناسه در پایگاه داده یافت نشد"
+            );
+            error.statusCode = 404;
+            throw error;
+        }
+
+        user.password = password;
+        await user.save();
+
+        res.status(200).json({ message: "عملیات با موفقیت انجام شد" });
+    } catch (err) {
+        next(err);
     }
-
-    const user = await User.findOne({ _id: req.params.id });
-
-    if (!user) {
-        return res.redirect("/404");
-    }
-
-    user.password = password;
-    await user.save();
-
-    req.flash("success_msg", "پسورد شما با موفقیت بروزرسانی شد");
-    res.redirect("/users/login");
 };
