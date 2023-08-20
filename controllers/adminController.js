@@ -37,13 +37,13 @@ exports.createPost = async (req, res) => {
 
 
 exports.editPost = async (req, res) => {
-    const errorArr = [];
 
     const thumbnail = req.files ? req.files.thumbnail : {};
     const fileName = `${shortId.generate()}_${thumbnail.name}`;
     const uploadPath = `${appRoot}/public/uploads/thumbnail/${fileName}`;
 
     const post = await Blog.findOne({ _id: req.params.id });
+
     try {
         if (thumbnail.name)
             await Blog.postValidation({ ...req.body, thumbnail });
@@ -58,15 +58,19 @@ exports.editPost = async (req, res) => {
             });
 
         if (!post) {
-            return res.redirect("errors/404");
+            const error = new Error("پستی با این شناسه یافت نشد");
+            error.statusCode = 404;
+            throw error;
         }
 
-        if (post.user.toString() != req.user._id) {
-            return res.redirect("/dashboard");
+        if (post.user.toString() != req.userId) {
+            const error = new Error("شما مجوز ویرایش این پست را ندارید");
+            error.statusCode = 401;
+            throw error;
         } else {
             if (thumbnail.name) {
                 fs.unlink(
-                    `${appRoot}/public/uploads/thumbnail/${post.thumbnail}`,
+                    `${appRoot}/public/uploads/thumbnails/${post.thumbnail}`,
                     async (err) => {
                         if (err) console.log(err);
                         else {
@@ -86,73 +90,74 @@ exports.editPost = async (req, res) => {
             post.thumbnail = thumbnail.name ? fileName : post.thumbnail;
 
             await post.save();
-            return res.redirect("/dashboard");
+
+            res.status(200).json({ message: "پست شما با موفقیت ویرایش شد" });
+
         }
     } catch (err) {
-        console.log(err);
-        err.inner.forEach((e) => {
-            errorArr.push({
-                name: e.path,
-                message: e.message,
-            });
-        });
-        res.render("private/editPost", {
-            pageTitle: "بخش مدیریت | ویرایش پست",
-            path: "/dashboard/edit-post",
-            layout: "./layouts/dashLayout",
-            fullname: req.user.fullname,
-            errors: errorArr,
-            post,
-        });
+        next(err);
+
     }
 };
 
-exports.deletePost = async (req, res) => {
-    const thumbnail = req.files ? req.files.thumbnail : {};
-    console.log(thumbnail);
+exports.deletePost = async (req, res, next) => {
     try {
-        if (thumbnail.name) {
-            fs.unlink(
-                `${appRoot}/public/uploads/thumbnail/${post.thumbnail}`,
-            );
-        }
-        const result = await Blog.findByIdAndRemove(req.params.id);
-        console.log(result);
-        res.redirect("/dashboard");
+        const post = await Blog.findByIdAndRemove(req.params.id);
+        const filePath = `${appRoot}/public/uploads/thumbnails/${post.thumbnail}`;
+
+        fs.unlink(filePath, (err) => {
+            if (err) {
+                const error = new Error(
+                    "خطای در پاکسازی عکس پست مربوطه رخ داده است"
+                );
+                error.statusCode = 400;
+                throw error;
+            } else {
+                res.status(200).json({ message: "پست شما با موفقیت پاک شد" });
+            }
+        });
     } catch (err) {
-        console.log(err);
-        res.render("errors/500");
+        next(err);
     }
 };
 
-exports.uploadImage = (req, res) => {
+
+exports.uploadImage = (req, res, next) => {
     const upload = multer({
         limits: { fileSize: 4000000 },
-        // dest: "uploads/",
-        // storage: storage,
         fileFilter: fileFilter,
     }).single("image");
-
-    upload(req, res, async (err) => {
-        if (err) {
-            if (err.code === "LIMIT_FILE_SIZE") {
-                return res
-                    .status(400)
-                    .send("حجم عکس ارسالی نباید بیشتر از 4 مگابایت باشد")
-            }
-            res.status(400).send(err);
-        } else {
-            if (req.files) {
-                const fileName = `${shortid.generate()} _ ${req.file.files.image.name}`;
-                await sharp(req.files.image.data).jpeg({
-                    quality: 60,
-                })
-                    .toFile(`./public/uploads/${fileName}`)
-                    .catch(err => console.log(err))
-                res.status(200).send(`http://localhost:3002/uploads/${fileName}`);
+    try {
+        upload(req, res, async (err) => {
+            if (err) {
+                if (err.code === "LIMIT_FILE_SIZE") {
+                    const error = new Error("حجم عکس ارسالی نباید بیشتر از 4 مگابایت باشد");
+                    error.statusCode = 422;
+                    throw error;
+                }
+                res.status(400).json({ error: err });
             } else {
-                res.send("جهت اپلود باید عکسی انتخاب کنیم")
+                if (req.files) {
+                    const fileName = `${shortId.generate()}_${req.files.image.name
+                        }`;
+                    await sharp(req.files.image.data)
+                        .jpeg({
+                            quality: 60,
+                        })
+                        .toFile(`./public/uploads/${fileName}`)
+                        .catch((err) => console.log(err));
+                    res.status(200).json({
+                        image: `http://localhost:3000/uploads/${fileName}`,
+                    });
+                } else {
+                    const error = new Error("جهت آپلود باید عکسی انتخاب کنید");
+                    error.statusCode = 400;
+                    throw error;
+                }
             }
-        }
-    });
+        });
+    } catch (error) {
+        next(error)
+    }
+
 };

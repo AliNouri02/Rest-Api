@@ -6,7 +6,7 @@ const dotEnv = require('dotenv');
 const connectDb = require('./config/db');
 const { errorHandler } = require('./middlewares/errors');
 const { setHeaders } = require('./middlewares/headers');
-
+const helmet = require('helmet');
 // Load Confg
 dotEnv.config({ path: "./config/config.env" })
 
@@ -18,6 +18,8 @@ require('./config/passport');
 
 
 const app = express();
+
+app.use(helmet());
 
 // Body Parser
 app.use(express.urlencoded({ extended: false })); // Form data parser middleware for parsing application
